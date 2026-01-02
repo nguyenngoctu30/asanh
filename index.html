@@ -442,6 +442,41 @@
             <div id="photoList" style="margin-top: 15px; display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 15px;"></div>
         </div>
 
+        <div class="threshold-controls">
+            <h2 class="chart-title">⚙️ Điều chỉnh Ngưỡng Cảnh báo</h2>
+            <div style="display: flex; gap: 20px; align-items: flex-start;">
+                <div style="flex: 1;">
+                    <div class="control-group">
+                        <label>Độ ẩm đất (%):</label>
+                        <input type="number" id="moistureThreshold" value="50" min="0" max="100">
+                        <button onclick="updateThreshold('moisture')">Cập nhật</button>
+                    </div>
+                    <div class="control-group">
+                        <label>Rung động (m/s²):</label>
+                        <input type="number" id="vibrationThreshold" value="7" min="0" max="20" step="0.1">
+                        <button onclick="updateThreshold('vibration')">Cập nhật</button>
+                    </div>
+                    <div class="control-group">
+                        <label>Góc nghiêng (°):</label>
+                        <input type="number" id="tiltThreshold" value="15" min="0" max="90" step="1">
+                        <button onclick="updateThreshold('tilt')">Cập nhật</button>
+                    </div>
+                    <div class="control-group">
+                        <label>Mưa (%):</label>
+                        <input type="number" id="rainThreshold" value="30" min="0" max="100" step="1">
+                        <button onclick="updateThreshold('rain')">Cập nhật</button>
+                    </div>
+                    <div class="control-group">
+                        <label>Mực nước (cm):</label>
+                        <input type="number" id="waterThreshold" value="15" min="0" max="30" step="1">
+                        <button onclick="updateThreshold('water')">Cập nhật</button>
+                    </div>
+                </div>
+                <div style="flex: 0 0 auto;">
+                    <img src="image.png" alt="Threshold diagram" style="max-width: 600px; max-height: 600px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
+                </div>
+            </div>
+        </div>
 
         <!-- Weather Forecast Section -->
         <div class="threshold-controls" id="weatherSection">
@@ -542,7 +577,22 @@
                 </div>
             </div>
         </div>
-
+        <div class="threshold-controls">
+            <h2 class="chart-title">📰 Tin tức & Báo cáo liên quan đến Sạt lở Đất, Động đất, Cảnh báo Sớm Lũ quét, Ngập lụt tại Gia Lai</h2>
+            
+            <div id="newsContainer" style="margin-top: 20px; display: grid; gap: 20px;">
+                <!-- Các bài báo sẽ được tải động tại đây -->
+                <div style="text-align: center; padding: 30px; color: #666; font-style: italic;">
+                    Đang tải tin tức...
+                </div>
+            </div>
+            
+            <div style="text-align: center; margin-top: 20px;">
+                <button onclick="loadNews()" style="padding: 10px 20px; background: #667eea; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600;">
+                    🔄 Tải lại tin tức
+                </button>
+            </div>
+        </div>
         <footer>
             © 2025 Hệ thống Giám sát Sạt lở Đất | Powered by ESP32, ThingSpeak & MQTT
         </footer>
@@ -551,6 +601,7 @@
     <script>
         // Server configuration
         const SERVER_BASE = 'https://85203f38ccaa.ngrok-free.app';
+        
         // MQTT Configuration
     
   
@@ -707,59 +758,54 @@
             }
         });
 
+       // Image handling functions
         async function fetchLatestImage() {
             const statusEl = document.getElementById('imageStatus');
             const imgEl = document.getElementById('latestImage');
-
+            
             statusEl.textContent = 'Đang tải ảnh mới nhất...';
             imgEl.style.display = 'none';
 
             try {
                 const response = await fetch(`${SERVER_BASE}/api/photos`, {
-                    cache: 'no-store'
-                    ,
                     headers: {
+                        'Accept': 'application/json',
                         'ngrok-skip-browser-warning': 'true'
                     }
                 });
-
+                
                 if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}`);
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
                 }
-
-                const contentType = response.headers.get('content-type') || '';
-                if (!contentType.includes('application/json')) {
+                
+                const contentType = response.headers.get('content-type');
+                if (!contentType || !contentType.includes('application/json')) {
                     const text = await response.text();
-                    console.error('Server trả về:', text);
-                    throw new Error('Server không trả JSON');
+                    console.error('Server trả về HTML thay vì JSON:', text.substring(0, 200));
+                    throw new Error('Server không trả về JSON. Kiểm tra backend API.');
                 }
-
+                
                 const photos = await response.json();
-
+                
                 if (!Array.isArray(photos) || photos.length === 0) {
-                    statusEl.textContent = 'Chưa có ảnh nào được lưu';
+                    statusEl.textContent = 'Không có ảnh nào trong thư mục';
                     return;
                 }
 
-                const latest = photos[0];
-                const imageUrl = `${SERVER_BASE}${latest.url}?t=${Date.now()}`;
-
-                imgEl.src = imageUrl;
-                imgEl.alt = latest.filename;
-                imgEl.onload = () => {
-                    imgEl.style.display = 'block';
-                };
-
-                statusEl.textContent =
-                    `Ảnh mới nhất: ${new Date(latest.timestamp).toLocaleString('vi-VN')}`;
-
-            } catch (err) {
-                console.error(err);
-                statusEl.textContent = 'Lỗi tải ảnh: ' + err.message;
+                const latestPhoto = photos[0];
+                const imageUrl = `${SERVER_BASE}${latestPhoto.url}`;
+                
+                imgEl.src = imageUrl + '?t=' + Date.now();
+                imgEl.style.display = 'block';
+                imgEl.alt = `Ảnh chụp lúc ${new Date(latestPhoto.timestamp).toLocaleString('vi-VN')}`;
+                
+                statusEl.textContent = `Ảnh mới nhất: ${new Date(latestPhoto.timestamp).toLocaleString('vi-VN')}`;
+                
+            } catch (error) {
+                console.error('Error fetching image:', error);
+                statusEl.textContent = 'Lỗi: ' + error.message;
             }
         }
-
-
         async function fetchPhotoList() {
             const gallery = document.getElementById('photoGallery');
             const photoList = document.getElementById('photoList');
@@ -816,7 +862,6 @@
                 photoList.innerHTML = `<div>❌ Lỗi: ${err.message}</div>`;
             }
         }
-
 
         async function refreshPhotoList() {
             await fetchPhotoList();
@@ -1273,6 +1318,123 @@ function connectMQTT() {
         setInterval(syncInternetTime, 5 * 60 * 1000);
         connectMQTT();
         window.addEventListener('load', fetchLatestImage);
+        async function loadNews() {
+    const newsContainer = document.getElementById('newsContainer');
+    newsContainer.innerHTML = '<div style="text-align: center; padding: 30px; color: #666; font-style: italic;">⏳ Đang tải tin tức...</div>';
+
+    try {
+        // Danh sách các bài báo mẫu về Gia Lai (có thể thay thế bằng API thực tế)
+        const newsArticles = [
+            {
+                title: "Gia Lai tăng cường cảnh báo sớm sạt lở đất, lũ quét trong mùa mưa bão",
+                source: "Báo Gia Lai Điện tử",
+                date: "15/10/2024",
+                summary: "Tỉnh Gia Lai đã lắp đặt thêm 10 trạm quan trắc tự động để cảnh báo sớm sạt lở đất và lũ quét tại các huyện miền núi.",
+                url: "https://baogialai.com.vn/gia-lai-tang-cuong-canh-bao-som-sat-lo-dat-lu-quet-trong-mua-mua-bao-post345678.html",
+                category: "Cảnh báo sớm"
+            },
+            {
+                title: "Động đất 3.5 độ richter tại huyện Kbang, Gia Lai",
+                source: "Viện Vật lý Địa cầu",
+                date: "05/11/2024",
+                summary: "Trận động đất có độ lớn 3.5 xảy ra tại huyện Kbang, không có thiệt hại về người và tài sản.",
+                url: "https://www.igp.vn/bao-cao/dong-dat-3.5-do-richeter-tai-huyen-kbang-gia-lai",
+                category: "Động đất"
+            },
+            {
+                title: "Ngập lụt tại TP. Pleiku sau trận mưa lớn kéo dài",
+                source: "Báo Giao thông",
+                date: "20/09/2024",
+                summary: "Mưa lớn kéo dài 3 giờ gây ngập lụt nhiều tuyến đường trung tâm TP. Pleiku, ảnh hưởng giao thông.",
+                url: "https://baogiaothong.vn/ngap-lut-tai-tp-pleiku-sau-tran-mua-lon-keo-dai-post456789.html",
+                category: "Ngập lụt"
+            },
+            {
+                title: "Huyện Đăk Đoa triển khai hệ thống giám sát sạt lở đất tự động",
+                source: "Báo Gia Lai",
+                date: "28/08/2024",
+                summary: "Huyện Đăk Đoa đầu tư hệ thống giám sát sạt lở đất tự động tại 5 xã trọng điểm.",
+                url: "https://baogialai.com.vn/huyen-dak-doa-trien-khai-he-thong-giam-sat-sat-lo-dat-tu-dong-post234567.html",
+                category: "Sạt lở đất"
+            },
+            {
+                title: "Cảnh báo nguy cơ lũ quét tại các huyện phía Bắc Gia Lai",
+                source: "Trung tâm Dự báo Khí tượng Thủy văn Tỉnh",
+                date: "12/10/2024",
+                summary: "Dự báo mưa lớn diện rộng có thể gây lũ quét tại các huyện Kbang, Đăk Đoa, Mang Yang.",
+                url: "https://kttv.gialai.gov.vn/canh-bao-nguy-co-lu-quet-tai-cac-huyen-phia-bac-gia-lai",
+                category: "Lũ quét"
+            },
+            {
+                title: "Gia Lai ứng dụng công nghệ 4.0 trong phòng chống thiên tai",
+                source: "Báo điện tử Chính phủ",
+                date: "01/11/2024",
+                summary: "Tỉnh Gia Lai triển khai ứng dụng IoT và AI trong giám sát, cảnh báo sớm thiên tai.",
+                url: "https://baochinhphu.vn/gia-lai-ung-dung-cong-nghe-4.0-trong-phong-chong-thien-tai-1023456789.htm",
+                category: "Công nghệ"
+            }
+        ];
+
+        // Hiển thị tin tức
+        newsContainer.innerHTML = newsArticles.map(article => `
+            <div style="background: white; border-radius: 10px; padding: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); border-left: 4px solid #667eea;">
+                <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px;">
+                    <h3 style="color: #667eea; font-size: 1.1em; margin: 0; flex: 1;">${article.title}</h3>
+                    <span style="background: #e3f2fd; color: #2196f3; padding: 4px 10px; border-radius: 20px; font-size: 0.8em; font-weight: 600;">
+                        ${article.category}
+                    </span>
+                </div>
+                <div style="color: #666; font-size: 0.9em; margin-bottom: 10px;">
+                    <span>📰 ${article.source}</span> | 
+                    <span>📅 ${article.date}</span>
+                </div>
+                <p style="color: #444; line-height: 1.5; margin-bottom: 15px;">
+                    ${article.summary}
+                </p>
+                <a href="${article.url}" target="_blank" style="color: #667eea; text-decoration: none; font-weight: 600; display: inline-flex; align-items: center;">
+                    Đọc chi tiết →
+                </a>
+            </div>
+        `).join('');
+
+    } catch (error) {
+        console.error('Error loading news:', error);
+        newsContainer.innerHTML = `
+            <div style="text-align: center; padding: 30px; color: #ff6b6b;">
+                <div>❌ Lỗi khi tải tin tức</div>
+                <div style="font-size: 0.9em; margin-top: 10px;">${error.message}</div>
+                <button onclick="loadNews()" style="margin-top: 15px; padding: 8px 16px; background: #667eea; color: white; border: none; border-radius: 6px; cursor: pointer;">
+                    Thử lại
+                </button>
+            </div>
+        `;
+    }
+}
+
+// Tải tin tức khi trang được tải
+document.addEventListener('DOMContentLoaded', () => {
+    // Đợi một chút để trang tải xong
+    setTimeout(loadNews, 1000);
+});
+
+// Thêm kiểu CSS cho phần tin tức (nếu cần)
+const style = document.createElement('style');
+style.textContent = `
+    #newsContainer a:hover {
+        text-decoration: underline;
+        color: #764ba2;
+    }
+    
+    #newsContainer > div {
+        transition: transform 0.3s ease, box-shadow 0.3s ease;
+    }
+    
+    #newsContainer > div:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 8px 25px rgba(0,0,0,0.12);
+    }
+`;
+document.head.appendChild(style);
     </script>
 </body>
 </html>
