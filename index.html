@@ -1,0 +1,1269 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Giám sát Sạt lở Đất - Real-time</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="https://unpkg.com/mqtt@5.3.0/dist/mqtt.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+            color: #333;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        header {
+            background: white;
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            margin-bottom: 30px;
+            text-align: center;
+        }
+
+        h1 {
+            color: #667eea;
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .subtitle {
+            color: #666;
+            font-size: 1.1em;
+        }
+
+        .status-bar {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 30px;
+            flex-wrap: wrap;
+        }
+
+        .status-card {
+            flex: 1;
+            min-width: 200px;
+            background: white;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.15);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .status-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 25px rgba(0,0,0,0.2);
+        }
+
+        .status-card h3 {
+            color: #667eea;
+            font-size: 0.9em;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .status-value {
+            font-size: 2em;
+            font-weight: bold;
+            color: #333;
+        }
+
+        .status-unit {
+            font-size: 0.8em;
+            color: #999;
+            margin-left: 5px;
+        }
+
+        .water-level-indicator {
+            margin-top: 15px;
+            position: relative;
+            height: 150px;
+            background: linear-gradient(to top, #e3f2fd 0%, #bbdefb 50%, #90caf9 100%);
+            border-radius: 8px;
+            overflow: hidden;
+            border: 2px solid #2196f3;
+        }
+
+        .water-fill {
+            position: absolute;
+            bottom: 0;
+            width: 100%;
+            background: linear-gradient(to top, #2196f3, #42a5f5);
+            transition: height 0.5s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+        }
+
+        .water-markers {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 100%;
+            pointer-events: none;
+        }
+
+        .water-marker {
+            position: absolute;
+            left: 0;
+            right: 0;
+            border-top: 1px dashed rgba(0,0,0,0.3);
+            font-size: 0.7em;
+            padding-left: 5px;
+            color: #666;
+        }
+
+        .image-container {
+            margin-top: 10px;
+            text-align: center;
+        }
+
+        .image-container img {
+            max-width: 100%;
+            max-height: 220px;
+            border-radius: 8px;
+            border: 1px solid #eee;
+            display: none;
+        }
+
+        .image-controls {
+            margin-top: 10px;
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .image-controls button {
+            padding: 8px 16px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: background 0.3s ease;
+        }
+
+        .image-controls button:hover {
+            background: #764ba2;
+        }
+
+        .image-status {
+            font-size: 0.9em;
+            color: #666;
+            text-align: center;
+        }
+
+        .warning-banner {
+            background: #ff6b6b;
+            color: white;
+            padding: 15px 25px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            display: none;
+            animation: pulse 2s infinite;
+            box-shadow: 0 5px 15px rgba(255,107,107,0.4);
+        }
+
+        .warning-banner.show {
+            display: block;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.8; }
+        }
+
+        .charts-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
+            gap: 25px;
+            margin-bottom: 30px;
+        }
+
+        .chart-container {
+            background: white;
+            padding: 25px;
+            border-radius: 15px;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.15);
+        }
+
+        .chart-title {
+            color: #667eea;
+            font-size: 1.3em;
+            margin-bottom: 15px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .chart-badge {
+            background: #667eea;
+            color: white;
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-size: 0.6em;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        canvas {
+            max-height: 300px;
+        }
+
+        .thingspeak-section {
+            background: white;
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.15);
+            margin-bottom: 30px;
+        }
+
+        .thingspeak-title {
+            color: #667eea;
+            font-size: 1.5em;
+            margin-bottom: 20px;
+            text-align: center;
+            font-weight: 600;
+        }
+
+        .thingspeak-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+        }
+
+        .thingspeak-chart {
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 3px 10px rgba(0,0,0,0.1);
+        }
+
+        .thingspeak-caption {
+            text-align: center;
+            font-size: 0.9em;
+            color: #444;
+            margin-top: 6px;
+        }
+
+        .connection-status {
+            display: inline-block;
+            padding: 8px 14px;
+            border-radius: 20px;
+            background: #ff6b6b;
+            color: white;
+            font-weight: 600;
+            box-shadow: 0 6px 18px rgba(0,0,0,0.08);
+            margin-top: 12px;
+        }
+
+        .connection-status.connected {
+            background: #51cf66;
+        }
+
+        .threshold-controls {
+            background: white;
+            padding: 25px;
+            border-radius: 15px;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.15);
+            margin-bottom: 30px;
+        }
+
+        .control-group {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 15px;
+            flex-wrap: wrap;
+        }
+
+        .control-group label {
+            font-weight: 600;
+            color: #667eea;
+            min-width: 150px;
+        }
+
+        .control-group input {
+            padding: 10px 15px;
+            border: 2px solid #667eea;
+            border-radius: 8px;
+            font-size: 1em;
+            width: 100px;
+        }
+
+        .control-group button {
+            padding: 10px 25px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: background 0.3s ease;
+        }
+
+        .control-group button:hover {
+            background: #764ba2;
+        }
+
+        footer {
+            text-align: center;
+            color: white;
+            padding: 20px;
+            font-size: 0.9em;
+        }
+
+        @media (max-width: 768px) {
+            .charts-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            h1 {
+                font-size: 1.8em;
+            }
+            
+            .status-bar {
+                flex-direction: column;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🏔️ HỆ THỐNG GIÁM SÁT SẠT LỞ ĐẤT, ĐỘNG ĐẤT, CẢNH BÁO SỚM LŨ QUÉT, NGẬP LỤT</h1>
+            <p class="subtitle">Theo dõi Real-time & Phân tích Dữ liệu</p>
+            <div style="text-align:center; margin-top:10px;">
+                <div id="internetTime" style="display:inline-block; background: rgba(255,255,255,0.9); padding:8px 14px; border-radius:12px; box-shadow:0 4px 12px rgba(0,0,0,0.08); font-weight:600;">⏳ Đang lấy giờ...</div>
+            </div>
+
+            <div class="connection-status" id="connectionStatus">Đang kết nối...</div>
+        </header>
+
+        <div class="warning-banner" id="warningBanner">
+            ⚠️ <span id="warningText"></span>
+        </div>
+
+        <div class="status-bar">
+            <div class="status-card">
+                <h3>📊 Độ ẩm đất</h3>
+                <div class="status-value">
+                    <span id="moistureValue">--</span>
+                    <span class="status-unit">%</span>
+                </div>
+            </div>
+            <div class="status-card">
+                <h3>📐 Góc nghiêng X</h3>
+                <div class="status-value">
+                    <span id="angleXValue">--</span>
+                    <span class="status-unit">°</span>
+                </div>
+            </div>
+            <div class="status-card">
+                <h3>📐 Góc nghiêng Y</h3>
+                <div class="status-value">
+                    <span id="angleYValue">--</span>
+                    <span class="status-unit">°</span>
+                </div>
+            </div>
+            <div class="status-card">
+                <h3>💥 Rung động</h3>
+                <div class="status-value">
+                    <span id="vibrationValue">--</span>
+                    <span class="status-unit">m/s²</span>
+                </div>
+            </div>
+            <div class="status-card">
+                <h3>🌧️ Cảm biến mưa</h3>
+                <div class="status-value">
+                    <span id="rainValue">--</span>
+                    <span class="status-unit">%</span>
+                </div>
+            </div>
+            <div class="status-card">
+                <h3>💧 Mực nước</h3>
+                <div class="status-value">
+                    <span id="waterLevelValue">--</span>
+                    <span class="status-unit">cm</span>
+                </div>
+                <div class="water-level-indicator">
+                    <div class="water-markers">
+                        <div class="water-marker" style="top: 0%;">30cm</div>
+                        <div class="water-marker" style="top: 33.3%;">20cm</div>
+                        <div class="water-marker" style="top: 66.6%;">10cm</div>
+                        <div class="water-marker" style="top: 100%; border-top: 2px solid red;">0cm</div>
+                    </div>
+                    <div class="water-fill" id="waterFill" style="height: 0%;">
+                        <span id="waterFillText">0 cm</span>
+                    </div>
+                </div>
+            </div>
+            <div class="status-card">
+                <h3>📷 Ảnh mới nhất tại vị trí xảy ra sự cố</h3>
+                <div class="image-container">
+                    <img id="latestImage" src="" alt="Latest capture" />
+                </div>
+                <div class="image-controls">
+                    <button onclick="fetchLatestImage()">Lấy ảnh mới</button>
+                    <button onclick="fetchPhotoList()">Xem danh sách ảnh</button>
+                </div>
+                <div class="image-status" id="imageStatus">Sẵn sàng lấy ảnh</div>
+            </div>
+        </div>
+
+        <!-- Photo Gallery Section -->
+        <div class="threshold-controls" id="photoGallery" style="display: none;">
+            <h2 class="chart-title">🖼️ Thư viện Ảnh</h2>
+            <div class="image-controls">
+                <button onclick="refreshPhotoList()">Làm mới danh sách</button>
+                <button onclick="hidePhotoGallery()">Ẩn thư viện</button>
+            </div>
+            <div id="photoList" style="margin-top: 15px; display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 15px;"></div>
+        </div>
+
+        <div class="threshold-controls">
+            <h2 class="chart-title">⚙️ Điều chỉnh Ngưỡng Cảnh báo</h2>
+            <div class="control-group">
+                <label>Độ ẩm đất (%):</label>
+                <input type="number" id="moistureThreshold" value="50" min="0" max="100">
+                <button onclick="updateThreshold('moisture')">Cập nhật</button>
+            </div>
+            <div class="control-group">
+                <label>Rung động (m/s²):</label>
+                <input type="number" id="vibrationThreshold" value="7" min="0" max="20" step="0.1">
+                <button onclick="updateThreshold('vibration')">Cập nhật</button>
+            </div>
+            <div class="control-group">
+                <label>Góc nghiêng (°):</label>
+                <input type="number" id="tiltThreshold" value="15" min="0" max="90" step="1">
+                <button onclick="updateThreshold('tilt')">Cập nhật</button>
+            </div>
+            <div class="control-group">
+                <label>Mưa (%):</label>
+                <input type="number" id="rainThreshold" value="30" min="0" max="100" step="1">
+                <button onclick="updateThreshold('rain')">Cập nhật</button>
+            </div>
+            <div class="control-group">
+                <label>Mực nước (cm):</label>
+                <input type="number" id="waterThreshold" value="15" min="0" max="30" step="1">
+                <button onclick="updateThreshold('water')">Cập nhật</button>
+            </div>
+        </div>
+
+        <!-- Weather Forecast Section -->
+        <div class="threshold-controls" id="weatherSection">
+            <h2 class="chart-title">☁️ Dự báo Thời tiết </h2>
+
+            <div class="control-group" style="align-items: center;">
+                <label>Thành phố / Vị trí:</label>
+                <input type="text" id="weatherCityInput" placeholder="Nhập thành phố (ví dụ: Hanoi)" style="width:300px;">
+                <button id="weatherSearchBtn">Tìm</button>
+                <button id="weatherGeoBtn">Dùng vị trí của tôi</button>
+            </div>
+
+            <div id="weatherResult" style="margin-top:18px; display:block;">
+                <div id="weatherCurrent" style="background:white; padding:15px; border-radius:10px; box-shadow:0 6px 18px rgba(0,0,0,0.06);">
+                    <strong>Thời tiết hiện tại:</strong>
+                    <div id="weatherCurrentContent">Chưa có dữ liệu</div>
+                </div>
+
+                <div id="weatherForecast" style="margin-top:12px; display:flex; gap:12px; flex-wrap:wrap;"></div>
+            </div>
+        </div>
+
+        <div class="charts-grid">
+            <div class="chart-container">
+                <h3 class="chart-title">
+                    💧 Độ ẩm Đất
+                    <span class="chart-badge">Real-time</span>
+                </h3>
+                <canvas id="moistureChart"></canvas>
+            </div>
+            <div class="chart-container">
+                <h3 class="chart-title">
+                    📊 Gia tốc ADXL345
+                    <span class="chart-badge">Real-time</span>
+                </h3>
+                <canvas id="accelChart"></canvas>
+            </div>
+            <div class="chart-container">
+                <h3 class="chart-title">
+                    🔄 Góc nghiêng MPU6050
+                    <span class="chart-badge">Real-time</span>
+                </h3>
+                <canvas id="angleChart"></canvas>
+            </div>
+            <div class="chart-container">
+                <h3 class="chart-title">
+                    🌧️ Cảm biến Mưa
+                    <span class="chart-badge">Real-time</span>
+                </h3>
+                <canvas id="rainChart"></canvas>
+            </div>
+            <div class="chart-container">
+                <h3 class="chart-title">
+                    💧 Mực nước
+                    <span class="chart-badge">Real-time</span>
+                </h3>
+                <canvas id="waterLevelChart"></canvas>
+            </div>
+            <div class="chart-container">
+                <h3 class="chart-title">
+                    ⚠️ Cảnh báo
+                    <span class="chart-badge">Live</span>
+                </h3>
+                <canvas id="warningChart"></canvas>
+            </div>
+        </div>
+
+        <div class="thingspeak-section">
+            <h2 class="thingspeak-title">📈 Biểu đồ ThingSpeak - Dữ liệu Trung bình</h2>
+            <div class="thingspeak-grid">
+                <div>
+                    <iframe class="thingspeak-chart" width="100%" height="260" style="border: 1px solid #cccccc;" src="https://thingspeak.com/channels/2860387/charts/1?bgcolor=%23ffffff&color=%23d62020&dynamic=true&results=60&type=line&api_key=SKMHUDBFASCVVGVR"></iframe>
+                    <div class="thingspeak-caption">Biểu đồ 1 — Gia tốc X (field1)</div>
+                </div>
+                <div>
+                    <iframe class="thingspeak-chart" width="100%" height="260" style="border: 1px solid #cccccc;" src="https://thingspeak.com/channels/2860387/charts/2?bgcolor=%23ffffff&color=%2300d620&dynamic=true&results=60&type=line&api_key=SKMHUDBFASCVVGVR"></iframe>
+                    <div class="thingspeak-caption">Biểu đồ 2 — Gia tốc Y (field2)</div>
+                </div>
+                <div>
+                    <iframe class="thingspeak-chart" width="100%" height="260" style="border: 1px solid #cccccc;" src="https://thingspeak.com/channels/2860387/charts/3?bgcolor=%23ffffff&color=%230020d6&dynamic=true&results=60&type=line&api_key=SKMHUDBFASCVVGVR"></iframe>
+                    <div class="thingspeak-caption">Biểu đồ 3 — Gia tốc Z (field3)</div>
+                </div>
+                <div>
+                    <iframe class="thingspeak-chart" width="100%" height="260" style="border: 1px solid #cccccc;" src="https://thingspeak.com/channels/2860387/charts/4?bgcolor=%23ffffff&color=%23ff8c00&dynamic=true&results=60&type=line&api_key=SKMHUDBFASCVVGVR"></iframe>
+                    <div class="thingspeak-caption">Biểu đồ 4 — Góc X (field4)</div>
+                </div>
+                <div>
+                    <iframe class="thingspeak-chart" width="100%" height="260" style="border: 1px solid #cccccc;" src="https://thingspeak.com/channels/2860387/charts/5?bgcolor=%23ffffff&color=%23ff00ff&dynamic=true&results=60&type=line&api_key=SKMHUDBFASCVVGVR"></iframe>
+                    <div class="thingspeak-caption">Biểu đồ 5 — Góc Y (field5)</div>
+                </div>
+                <div>
+                    <iframe class="thingspeak-chart" width="100%" height="260" style="border: 1px solid #cccccc;" src="https://thingspeak.com/channels/2860387/charts/6?bgcolor=%23ffffff&color=%2300bfff&dynamic=true&results=60&type=line&api_key=SKMHUDBFASCVVGVR"></iframe>
+                    <div class="thingspeak-caption">Biểu đồ 6 — Độ ẩm đất (field6)</div>
+                </div>
+                <div>
+                    <iframe class="thingspeak-chart" width="100%" height="260" style="border: 1px solid #cccccc;" src="https://thingspeak.com/channels/2860387/charts/8?bgcolor=%23ffffff&color=%232196f3&dynamic=true&results=60&type=line&api_key=SKMHUDBFASCVVGVR"></iframe>
+                    <div class="thingspeak-caption">Biểu đồ 8 — Mực nước (field8)</div>
+                </div>
+            </div>
+        </div>
+
+        <footer>
+            © 2025 Hệ thống Giám sát Sạt lở Đất | Powered by ESP32, ThingSpeak & MQTT
+        </footer>
+    </div>
+
+    <script>
+        // Server configuration
+        const SERVER_BASE = 'https://times-levitra-gazette-shopzilla.trycloudflare.com';
+        
+        // MQTT Configuration
+    
+  
+        const isSecure = window.location.protocol === 'https:';
+        const MQTT_BROKER = isSecure 
+            ? 'wss://broker.hivemq.com:8884/mqtt'  // Port 8884 cho WSS
+            : 'ws://broker.hivemq.com:8000/mqtt';   // Port 8000 cho WS
+
+        const MQTT_OPTIONS = {
+            clientId: 'WebClient_' + Math.random().toString(16).substr(2, 8),
+            protocolVersion: 5,  // Sử dụng MQTT 5.0
+            reconnectPeriod: 5000,
+            connectTimeout: 10000
+        };
+        let mqttClient;
+        const maxDataPoints = 30;
+
+        // Initialize Charts
+        const moistureChart = new Chart(document.getElementById('moistureChart'), {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: 'Độ ẩm (%)',
+                    data: [],
+                    borderColor: '#00bfff',
+                    backgroundColor: 'rgba(0, 191, 255, 0.1)',
+                    tension: 0.4,
+                    fill: true
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: true,
+                plugins: { legend: { display: true } },
+                scales: { y: { beginAtZero: true, max: 100 } }
+            }
+        });
+
+        const accelChart = new Chart(document.getElementById('accelChart'), {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [
+                    {
+                        label: 'X (m/s²)',
+                        data: [],
+                        borderColor: '#ff6384',
+                        tension: 0.4
+                    },
+                    {
+                        label: 'Y (m/s²)',
+                        data: [],
+                        borderColor: '#36a2eb',
+                        tension: 0.4
+                    },
+                    {
+                        label: 'Z (m/s²)',
+                        data: [],
+                        borderColor: '#4bc0c0',
+                        tension: 0.4
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: true,
+                plugins: { legend: { display: true } }
+            }
+        });
+
+        const angleChart = new Chart(document.getElementById('angleChart'), {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [
+                    {
+                        label: 'Góc X (°)',
+                        data: [],
+                        borderColor: '#ff8c00',
+                        tension: 0.4
+                    },
+                    {
+                        label: 'Góc Y (°)',
+                        data: [],
+                        borderColor: '#ff00ff',
+                        tension: 0.4
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: true,
+                plugins: { legend: { display: true } }
+            }
+        });
+
+        const rainChart = new Chart(document.getElementById('rainChart'), {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: 'Mưa (%)',
+                    data: [],
+                    borderColor: '#1e90ff',
+                    backgroundColor: 'rgba(30,144,255,0.1)',
+                    tension: 0.4,
+                    fill: true
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: true,
+                plugins: { legend: { display: true } },
+                scales: { y: { beginAtZero: true, max: 100 } }
+            }
+        });
+
+        const waterLevelChart = new Chart(document.getElementById('waterLevelChart'), {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: 'Mực nước (cm)',
+                    data: [],
+                    borderColor: '#2196f3',
+                    backgroundColor: 'rgba(33,150,243,0.1)',
+                    tension: 0.4,
+                    fill: true
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: true,
+                plugins: { legend: { display: true } },
+                scales: { y: { beginAtZero: true, max: 30 } }
+            }
+        });
+
+        const warningChart = new Chart(document.getElementById('warningChart'), {
+            type: 'bar',
+            data: {
+                labels: ['Không', 'Rung động', 'Nghiêng', 'Độ ẩm', 'Mưa', 'Mực nước'],
+                datasets: [{
+                    label: 'Số lần cảnh báo',
+                    data: [0, 0, 0, 0, 0, 0],
+                    backgroundColor: ['#51cf66', '#ff6b6b', '#ffa500', '#00bfff', '#1e90ff', '#2196f3']
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: true,
+                scales: { y: { beginAtZero: true } }
+            }
+        });
+
+        // Image handling functions
+        async function fetchLatestImage() {
+            const statusEl = document.getElementById('imageStatus');
+            const imgEl = document.getElementById('latestImage');
+            
+            statusEl.textContent = 'Đang tải ảnh mới nhất...';
+            imgEl.style.display = 'none';
+
+            try {
+                const response = await fetch(`${SERVER_BASE}/api/photos`);
+                if (!response.ok) throw new Error('Không thể lấy danh sách ảnh');
+                
+                const photos = await response.json();
+                if (photos.length === 0) {
+                    statusEl.textContent = 'Không có ảnh nào trong thư mục';
+                    return;
+                }
+
+                const latestPhoto = photos[0];
+                const imageUrl = `${SERVER_BASE}${latestPhoto.url}`;
+                
+                imgEl.src = imageUrl + '?t=' + Date.now();
+                imgEl.style.display = 'block';
+                imgEl.alt = `Ảnh chụp lúc ${new Date(latestPhoto.timestamp).toLocaleString('vi-VN')}`;
+                
+                statusEl.textContent = `Ảnh mới nhất: ${new Date(latestPhoto.timestamp).toLocaleString('vi-VN')}`;
+                
+            } catch (error) {
+                console.error('Error fetching image:', error);
+                statusEl.textContent = 'Lỗi khi tải ảnh: ' + error.message;
+            }
+        }
+
+        async function fetchPhotoList() {
+            const gallery = document.getElementById('photoGallery');
+            const photoList = document.getElementById('photoList');
+            
+            gallery.style.display = 'block';
+            photoList.innerHTML = '<div>Đang tải danh sách ảnh...</div>';
+
+            try {
+                const response = await fetch(`${SERVER_BASE}/api/photos`);
+                if (!response.ok) throw new Error('Không thể lấy danh sách ảnh');
+                
+                const photos = await response.json();
+                
+                if (photos.length === 0) {
+                    photoList.innerHTML = '<div>Không có ảnh nào trong thư mục</div>';
+                    return;
+                }
+
+                photoList.innerHTML = photos.map(photo => `
+                    <div style="text-align: center; border: 1px solid #ddd; padding: 10px; border-radius: 8px;">
+                        <img src="${SERVER_BASE}${photo.url}" 
+                             alt="${photo.filename}" 
+                             style="width: 100%; height: 150px; object-fit: cover; border-radius: 4px;">
+                        <div style="margin-top: 8px; font-size: 0.8em;">
+                            <div>${new Date(photo.timestamp).toLocaleString('vi-VN')}</div>
+                            <div>${(photo.size / 1024).toFixed(1)} KB</div>
+                            <button onclick="deletePhoto('${photo.filename}')" 
+                                    style="margin-top: 5px; padding: 3px 8px; background: #ff6b6b; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.7em;">
+                                Xóa
+                            </button>
+                        </div>
+                    </div>
+                `).join('');
+
+            } catch (error) {
+                console.error('Error fetching photo list:', error);
+                photoList.innerHTML = `<div>Lỗi: ${error.message}</div>`;
+            }
+        }
+
+        async function refreshPhotoList() {
+            await fetchPhotoList();
+        }
+
+        function hidePhotoGallery() {
+            document.getElementById('photoGallery').style.display = 'none';
+        }
+
+        async function deletePhoto(filename) {
+            if (!confirm(`Bạn có chắc muốn xóa ảnh ${filename}?`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`${SERVER_BASE}/api/photos/${filename}`, {
+                    method: 'DELETE'
+                });
+
+                if (!response.ok) throw new Error('Không thể xóa ảnh');
+                
+                alert('Đã xóa ảnh thành công');
+                await refreshPhotoList();
+                
+            } catch (error) {
+                console.error('Error deleting photo:', error);
+                alert('Lỗi khi xóa ảnh: ' + error.message);
+            }
+        }
+
+        setInterval(fetchLatestImage, 30000);
+
+        function testMQTTConnection() {
+    console.log('🔍 Kiểm tra kết nối MQTT...');
+    
+    // Kiểm tra broker URL
+    if (!MQTT_BROKER) {
+        console.error('❌ Broker URL không xác định');
+        return false;
+    }
+    
+    // Kiểm tra xem mqtt library đã load chưa
+    if (typeof mqtt === 'undefined') {
+        console.error('❌ MQTT library chưa được load');
+        return false;
+    }
+    
+    console.log('✅ Broker URL:', MQTT_BROKER);
+    console.log('✅ MQTT library đã sẵn sàng');
+    return true;
+}
+
+// Hàm kết nối MQTT được cải thiện
+function connectMQTT() {
+    const statusEl = document.getElementById('connectionStatus');
+    
+    // Kiểm tra trước khi kết nối
+    if (!testMQTTConnection()) {
+        statusEl.textContent = '✗ Lỗi cấu hình MQTT';
+        statusEl.classList.remove('connected');
+        setTimeout(connectMQTT, 5000); // Thử lại sau 5s
+        return;
+    }
+
+    try {
+        console.log('🔄 Đang kết nối đến MQTT broker...');
+        statusEl.textContent = '🔄 Đang kết nối...';
+        statusEl.classList.remove('connected');
+
+        // Tạo client ID ngẫu nhiên
+        const clientId = 'webclient_' + Math.random().toString(16).substr(2, 8);
+        
+        const options = {
+            clientId: clientId,
+            keepalive: 60,
+            clean: true,
+            reconnectPeriod: 4000,
+            connectTimeout: 8000,
+            will: {
+                topic: 'sensors/status',
+                payload: JSON.stringify({ client: clientId, status: 'offline' }),
+                qos: 1,
+                retain: false
+            }
+        };
+
+        mqttClient = mqtt.connect(MQTT_BROKER, options);
+
+        mqttClient.on('connect', () => {
+            console.log('✅ Đã kết nối MQTT thành công');
+            console.log('📡 Client ID:', clientId);
+            
+            statusEl.textContent = `✓ Đã kết nối (${clientId})`;
+            statusEl.classList.add('connected');
+            
+            // Đăng ký topics
+            const topics = ['sensors/data', 'sensors/warnings', 'sensors/status'];
+            topics.forEach(topic => {
+                mqttClient.subscribe(topic, { qos: 1 }, (err) => {
+                    if (err) {
+                        console.error(`❌ Lỗi subscribe ${topic}:`, err);
+                    } else {
+                        console.log(`✅ Đã subscribe ${topic}`);
+                    }
+                });
+            });
+
+            // Gửi trạng thái online
+            mqttClient.publish('sensors/status', 
+                JSON.stringify({ client: clientId, status: 'online', timestamp: new Date().toISOString() }),
+                { qos: 1 }
+            );
+        });
+
+        mqttClient.on('message', (topic, message) => {
+            console.log(`📨 Nhận tin từ ${topic}:`, message.toString());
+            try {
+                if (topic === 'sensors/data') {
+                    handleSensorData(JSON.parse(message.toString()));
+                } else if (topic === 'sensors/warnings') {
+                    handleWarning(message.toString());
+                }
+                
+            } catch (error) {
+                console.error('❌ Lỗi xử lý message:', error);
+            }
+        });
+
+        mqttClient.on('error', (error) => {
+            console.error('❌ MQTT Error:', error);
+            statusEl.textContent = `✗ Lỗi: ${error.message}`;
+            statusEl.classList.remove('connected');
+        });
+
+        mqttClient.on('close', () => {
+            console.log('🔌 MQTT connection closed');
+            statusEl.textContent = '🔌 Kết nối đã đóng';
+            statusEl.classList.remove('connected');
+        });
+
+        mqttClient.on('offline', () => {
+            console.log('📴 MQTT offline');
+            statusEl.textContent = '📴 Mất kết nối';
+            statusEl.classList.remove('connected');
+        });
+
+        mqttClient.on('reconnect', () => {
+            console.log('🔄 Đang kết nối lại...');
+            statusEl.textContent = '🔄 Đang kết nối lại...';
+            statusEl.classList.remove('connected');
+        });
+
+    } catch (error) {
+        console.error('❌ Lỗi khởi tạo MQTT:', error);
+        statusEl.textContent = `✗ Lỗi: ${error.message}`;
+        statusEl.classList.remove('connected');
+        
+        // Thử lại sau 10s
+        setTimeout(connectMQTT, 10000);
+    }
+}
+        function updateWaterLevelDisplay(waterLevel) {
+            const waterFill = document.getElementById('waterFill');
+            const waterFillText = document.getElementById('waterFillText');
+            
+            // Calculate percentage (0-30cm range)
+            const percentage = Math.min(100, (waterLevel / 30) * 100);
+            
+            waterFill.style.height = percentage + '%';
+            waterFillText.textContent = waterLevel.toFixed(1) + ' cm';
+            
+            // Change color based on level
+            if (waterLevel > 20) {
+                waterFill.style.background = 'linear-gradient(to top, #f44336, #e57373)';
+            } else if (waterLevel > 15) {
+                waterFill.style.background = 'linear-gradient(to top, #ff9800, #ffb74d)';
+            } else {
+                waterFill.style.background = 'linear-gradient(to top, #2196f3, #42a5f5)';
+            }
+        }
+
+        function handleSensorData(data) {
+            const now = new Date().toLocaleTimeString('vi-VN');
+            
+            // Update status cards
+            document.getElementById('moistureValue').textContent = data.moisture;
+            document.getElementById('angleXValue').textContent = data.angleX.toFixed(1);
+            document.getElementById('angleYValue').textContent = data.angleY.toFixed(1);
+            
+            const vibration = Math.sqrt(data.x**2 + data.y**2 + data.z**2).toFixed(2);
+            document.getElementById('vibrationValue').textContent = vibration;
+
+            // Rain
+            if (typeof data.rain !== 'undefined') {
+                document.getElementById('rainValue').textContent = data.rain;
+            }
+
+            // Water Level
+            if (typeof data.waterLevel !== 'undefined') {
+                const waterLevel = parseFloat(data.waterLevel);
+                document.getElementById('waterLevelValue').textContent = waterLevel.toFixed(1);
+                updateWaterLevelDisplay(waterLevel);
+            }
+
+            // Update chart data - FIXED VERSION
+            const labels = moistureChart.data.labels;
+            labels.push(now);
+            
+            // ĐỒNG BỘ NHÃN CHO TẤT CẢ BIỂU ĐỒ
+            moistureChart.data.labels = labels;
+            accelChart.data.labels = [...labels];  // Tạo bản sao để tránh tham chiếu
+            angleChart.data.labels = [...labels];
+            rainChart.data.labels = [...labels];
+            waterLevelChart.data.labels = [...labels];
+            
+            // Update datasets
+            moistureChart.data.datasets[0].data.push(data.moisture);
+            accelChart.data.datasets[0].data.push(data.x);
+            accelChart.data.datasets[1].data.push(data.y);
+            accelChart.data.datasets[2].data.push(data.z);
+            angleChart.data.datasets[0].data.push(data.angleX);
+            angleChart.data.datasets[1].data.push(data.angleY);
+            rainChart.data.datasets[0].data.push(typeof data.rain !== 'undefined' ? data.rain : null);
+            waterLevelChart.data.datasets[0].data.push(typeof data.waterLevel !== 'undefined' ? data.waterLevel : null);
+
+            // Limit data points cho tất cả biểu đồ
+            if (labels.length > maxDataPoints) {
+                labels.shift();
+                
+                moistureChart.data.datasets[0].data.shift();
+                moistureChart.data.labels = [...labels];
+                
+                accelChart.data.datasets.forEach(dataset => dataset.data.shift());
+                accelChart.data.labels = [...labels];
+                
+                angleChart.data.datasets.forEach(dataset => dataset.data.shift());
+                angleChart.data.labels = [...labels];
+                
+                rainChart.data.datasets[0].data.shift();
+                rainChart.data.labels = [...labels];
+                
+                waterLevelChart.data.datasets[0].data.shift();
+                waterLevelChart.data.labels = [...labels];
+            }
+
+            // Update all charts - THÊM 'none' để tối ưu hiệu suất
+            moistureChart.update('none');
+            accelChart.update('none');
+            angleChart.update('none');
+            rainChart.update('none');
+            waterLevelChart.update('none');
+        }
+
+        function handleWarning(warning) {
+            const warningBanner = document.getElementById('warningBanner');
+            const warningText = document.getElementById('warningText');
+            
+            warningText.textContent = warning;
+            warningBanner.classList.add('show');
+            
+            // Update warning chart
+            const low = warning.toLowerCase();
+            if (low.includes('rung')) {
+                warningChart.data.datasets[0].data[1]++;
+            } else if (low.includes('nghiêng') || low.includes('góc')) {
+                warningChart.data.datasets[0].data[2]++;
+            } else if (low.includes('ẩm')) {
+                warningChart.data.datasets[0].data[3]++;
+            } else if (low.includes('mua') || low.includes('mưa')) {
+                warningChart.data.datasets[0].data[4]++;
+            } else if (low.includes('nước') || low.includes('nuoc')) {
+                warningChart.data.datasets[0].data[5]++;
+            }
+            warningChart.update();
+
+            setTimeout(() => {
+                warningBanner.classList.remove('show');
+            }, 5000);
+        }
+
+        function updateThreshold(type) {
+            let topic, value;
+            
+            if (type === 'moisture') {
+                topic = 'sensors/moisture_threshold';
+                value = document.getElementById('moistureThreshold').value;
+            } else if (type === 'vibration') {
+                topic = 'sensors/vibration_threshold';
+                value = document.getElementById('vibrationThreshold').value;
+            } else if (type === 'tilt') {
+                topic = 'sensors/tilt_threshold';
+                value = document.getElementById('tiltThreshold').value;
+            } else if (type === 'rain') {
+                topic = 'sensors/rain_threshold';
+                value = document.getElementById('rainThreshold').value;
+            } else if (type === 'water') {
+                topic = 'sensors/water_threshold';
+                value = document.getElementById('waterThreshold').value;
+            }
+            
+            if (mqttClient && mqttClient.connected) {
+                mqttClient.publish(topic, value);
+                alert(`Đã cập nhật ngưỡng ${type}: ${value}`);
+            } else {
+                alert('Chưa kết nối MQTT!');
+            }
+        }
+
+        // Weather Functions
+        let timeOffsetMs = 0;
+
+        async function geocodeCity(city) {
+            const url = 'https://nominatim.openstreetmap.org/search?format=json&limit=1&q=' + encodeURIComponent(city);
+            const res = await fetch(url);
+            if (!res.ok) throw new Error('Geocoding lỗi: ' + res.status);
+            const arr = await res.json();
+            if (!arr || arr.length === 0) throw new Error('Không tìm thấy vị trí');
+            return { lat: parseFloat(arr[0].lat), lon: parseFloat(arr[0].lon), display_name: arr[0].display_name };
+        }
+
+        async function fetchWeather(lat, lon) {
+            const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,weathercode&timezone=auto&forecast_days=4`;
+            const res = await fetch(url);
+            if (!res.ok) throw new Error('Lỗi truy vấn thời tiết: ' + res.status);
+            return res.json();
+        }
+
+        function weatherCodeToText(code) {
+            const map = {
+                0: 'Trời trong', 1: 'Ít mây', 2: 'Nhiều mây', 3: 'Mây phủ',
+                45: 'Sương mù', 48: 'Sương mù đóng băng',
+                51: 'Mưa nhẹ', 53: 'Mưa vừa', 55: 'Mưa nặng',
+                61: 'Mưa nhỏ', 63: 'Mưa vừa', 65: 'Mưa to',
+                71: 'Tuyết nhẹ', 73: 'Tuyết vừa', 75: 'Tuyết mạnh',
+                80: 'Mưa rải rác', 81: 'Mưa rải rác vừa', 82: 'Mưa rải rác mạnh',
+                95: 'Giông bão'
+            };
+            return map[code] || 'Không rõ';
+        }
+
+        function renderWeather(result, placeName) {
+            const currentWrap = document.getElementById('weatherCurrentContent');
+            const forecastWrap = document.getElementById('weatherForecast');
+            try {
+                const cw = result.current_weather;
+                currentWrap.innerHTML = `
+                    <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+                        <div style="font-size:1.1em; font-weight:700;">${placeName || ''}</div>
+                        <div>🌡️ Nhiệt: <strong>${cw.temperature}°C</strong></div>
+                        <div>💨 Tốc: <strong>${cw.windspeed} km/h</strong></div>
+                        <div>📊 Code: <strong>${weatherCodeToText(cw.weathercode)} (${cw.weathercode})</strong></div>
+                    </div>
+                `;
+
+                const days = result.daily;
+                forecastWrap.innerHTML = '';
+                if (days && days.time) {
+                    for (let i = 0; i < Math.min(days.time.length, 4); i++) {
+                        const date = days.time[i];
+                        const minT = days.temperature_2m_min[i];
+                        const maxT = days.temperature_2m_max[i];
+                        const prec = days.precipitation_sum[i];
+                        const wcode = days.weathercode ? (days.weathercode[i] ?? '') : '';
+
+                        const card = document.createElement('div');
+                        card.style.background = 'white';
+                        card.style.padding = '12px';
+                        card.style.borderRadius = '8px';
+                        card.style.boxShadow = '0 6px 18px rgba(0,0,0,0.06)';
+                        card.style.minWidth = '160px';
+                        card.innerHTML = `
+                            <div style="font-weight:700; margin-bottom:6px;">${new Date(date).toLocaleDateString('vi-VN', { weekday: 'short', day: '2-digit', month: '2-digit' })}</div>
+                            <div>🌡️ ${minT}°C — ${maxT}°C</div>
+                            <div>☔ ${prec} mm</div>
+                            <div>🔎 ${weatherCodeToText(wcode)}</div>
+                        `;
+                        forecastWrap.appendChild(card);
+                    }
+                }
+            } catch (err) {
+                currentWrap.textContent = 'Lỗi hiển thị thời tiết: ' + err.message;
+                forecastWrap.innerHTML = '';
+            }
+        }
+
+        async function searchWeatherByCity() {
+            const q = document.getElementById('weatherCityInput').value.trim();
+            if (!q) { alert('Vui lòng nhập tên thành phố'); return; }
+            try {
+                const geo = await geocodeCity(q);
+                const data = await fetchWeather(geo.lat, geo.lon);
+                renderWeather(data, geo.display_name);
+            } catch (err) {
+                alert('Lỗi khi lấy dữ liệu thời tiết: ' + err.message);
+                console.error(err);
+            }
+        }
+
+        async function searchWeatherByGeolocation() {
+            if (!navigator.geolocation) { alert('Trình duyệt không hỗ trợ Geolocation'); return; }
+            navigator.geolocation.getCurrentPosition(async (pos) => {
+                const lat = pos.coords.latitude;
+                const lon = pos.coords.longitude;
+                try {
+                    const data = await fetchWeather(lat, lon);
+                    renderWeather(data, `Vị trí (${lat.toFixed(4)}, ${lon.toFixed(4)})`);
+                } catch (err) {
+                    alert('Lỗi khi lấy dữ liệu thời tiết: ' + err.message);
+                }
+            }, (err) => {
+                alert('Không thể lấy vị trí: ' + err.message);
+            });
+        }
+
+        function formatTimeForDisplay(d) {
+            return d.toLocaleString('vi-VN', { hour12: false });
+        }
+
+        async function syncInternetTime() {
+            const el = document.getElementById('internetTime');
+            try {
+                const res = await fetch('https://worldtimeapi.org/api/timezone/Asia/Ho_Chi_Minh');
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                const j = await res.json();
+                const serverMs = Date.parse(j.datetime);
+                timeOffsetMs = serverMs - Date.now();
+                el.textContent = '⏰ ' + formatTimeForDisplay(new Date(Date.now() + timeOffsetMs));
+            } catch (err) {
+                console.warn('Time sync failed:', err);
+                timeOffsetMs = 0;
+                const now = new Date();
+                el.textContent = '⏰ ' + formatTimeForDisplay(now) + ' (local)';
+            }
+        }
+
+        function startClock() {
+            const el = document.getElementById('internetTime');
+            setInterval(() => {
+                const now = new Date(Date.now() + timeOffsetMs);
+                el.textContent = '⏰ ' + formatTimeForDisplay(now);
+            }, 1000);
+        }
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            const btn = document.getElementById('weatherSearchBtn');
+            const geoBtn = document.getElementById('weatherGeoBtn');
+            btn && btn.addEventListener('click', searchWeatherByCity);
+            geoBtn && geoBtn.addEventListener('click', searchWeatherByGeolocation);
+        });
+
+        syncInternetTime();
+        startClock();
+        setInterval(syncInternetTime, 5 * 60 * 1000);
+        connectMQTT();
+        window.addEventListener('load', fetchLatestImage);
+    </script>
+</body>
+</html>
