@@ -24,7 +24,7 @@ const char* mqtt_status_topic = "esp32cam/status";
 
 // Server URL - Using HTTP
 const char* serverUrl = "http://vista-workplace-toe-buildings.trycloudflare.com/upload";
-
+ https://having-medications-king-concerts.trycloudflare.com  
 // Upload settings
 const int MAX_UPLOAD_RETRIES = 3;
 const int UPLOAD_TIMEOUT = 30000;  // 30 seconds
@@ -497,4 +497,5 @@ void captureAndUploadPhoto() {
     Serial.println("🧹 Low memory, cleaning up...");
     delay(100);
   }
+
 }
