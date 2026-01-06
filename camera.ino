@@ -11,26 +11,24 @@
 
 // ==================== CONFIGURATION ====================
 // WiFi credentials
-const char* ssid = "Tiem Tra Hoa FPT";
-const char* password = "79797979";
+const char* ssid = "677 5G";
+const char* password = "10101010";
 
 // MQTT Broker settings
 const char* mqtt_server = "broker.hivemq.com";
 const int mqtt_port = 1883;
 const char* mqtt_topic = "esp32cam/capture";
 const char* mqtt_client_id = "ESP32CAM_Client";
-// Status topic for connection and upload messages
 const char* mqtt_status_topic = "esp32cam/status";
 
 // Server URL - Using HTTP
-const char* serverUrl = "http://vista-workplace-toe-buildings.trycloudflare.com/upload";
- https://having-medications-king-concerts.trycloudflare.com  
+const char* serverUrl = "http://having-medications-king-concerts.trycloudflare.com";
+
 // Upload settings
 const int MAX_UPLOAD_RETRIES = 3;
-const int UPLOAD_TIMEOUT = 30000;  // 30 seconds
-const int CONNECT_TIMEOUT = 15000; // 15 seconds
+const int UPLOAD_TIMEOUT = 60000;  // 60 seconds
+const int CONNECT_TIMEOUT = 30000; // 30 seconds
 
-// WiFi client with larger buffer
 WiFiClient wifiClient;
 PubSubClient mqttClient(wifiClient);
 
@@ -55,7 +53,6 @@ const unsigned long WIFI_CHECK_INTERVAL = 10000;
 #define VSYNC_GPIO_NUM    25
 #define HREF_GPIO_NUM     23
 #define PCLK_GPIO_NUM     22
-// Flash (LED) pin (AI-Thinker modules commonly use GPIO4)
 #define FLASH_GPIO_NUM     4
 
 // ==================== SETUP ====================
@@ -63,21 +60,14 @@ void setup() {
   Serial.begin(115200);
   Serial.setDebugOutput(true);
   Serial.println("\n\n🚀 ESP32-CAM Starting...");
-  // Initialize flash pin
+  
   pinMode(FLASH_GPIO_NUM, OUTPUT);
-  // Default OFF (assume HIGH turns LED on on most boards; change if inverted)
   digitalWrite(FLASH_GPIO_NUM, LOW);
   
-  // Disable brownout detector
   WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
   
-  // Initialize WiFi
   setupWiFi();
-  
-  // Setup MQTT
   setupMQTT();
-  
-  // Initialize Camera
   setupCamera();
   
   Serial.println("✅ System ready!");
@@ -86,19 +76,16 @@ void setup() {
 
 // ==================== MAIN LOOP ====================
 void loop() {
-  // Periodic WiFi health check
   if (millis() - lastWiFiCheck > WIFI_CHECK_INTERVAL) {
     checkWiFiHealth();
     lastWiFiCheck = millis();
   }
   
-  // Maintain MQTT connection
   if (!mqttClient.connected()) {
     reconnectMQTT();
   }
   mqttClient.loop();
 
-  // Handle photo capture request
   if (takeNewPhoto) {
     Serial.println("\n📸 ========== CAPTURE REQUEST ==========");
     unsigned long startTime = millis();
@@ -119,8 +106,6 @@ void setupWiFi() {
   WiFi.mode(WIFI_STA);
   WiFi.setAutoReconnect(true);
   WiFi.persistent(true);
-  
-  // Increase WiFi power for better signal
   WiFi.setTxPower(WIFI_POWER_19_5dBm);
   
   Serial.println("📡 Connecting to WiFi...");
@@ -201,7 +186,6 @@ void reconnectMQTT() {
       Serial.println(" ✅ Connected");
       mqttClient.subscribe(mqtt_topic);
       Serial.printf("📡 Subscribed to: %s\n", mqtt_topic);
-      // Publish online status
       if (mqttClient.connected()) {
         mqttClient.publish(mqtt_status_topic, "online");
       }
@@ -216,7 +200,6 @@ void reconnectMQTT() {
   if (!mqttClient.connected()) {
     Serial.println("❌ MQTT connection failed, restarting ESP32...");
     delay(1000);
-    // If still connected (rare), publish offline; otherwise just restart
     if (mqttClient.connected()) {
       mqttClient.publish(mqtt_status_topic, "offline");
     }
@@ -249,21 +232,20 @@ void setupCamera() {
   config.pixel_format = PIXFORMAT_JPEG;
   config.grab_mode = CAMERA_GRAB_LATEST;
 
-  // Use lower resolution for more reliable uploads
+  // Giảm kích thước ảnh để upload dễ dàng hơn
   if (psramFound()) {
     Serial.println("✅ PSRAM detected");
-    config.frame_size = FRAMESIZE_VGA;  // 640x480 (smaller than SVGA)
-    config.jpeg_quality = 14;           // Slightly higher quality but smaller
+    config.frame_size = FRAMESIZE_VGA;   // 640x480 (nhỏ hơn)
+    config.jpeg_quality = 15;            // Chất lượng vừa phải
     config.fb_count = 2;
     config.fb_location = CAMERA_FB_IN_PSRAM;
   } else {
     Serial.println("⚠️ No PSRAM, using internal RAM");
-    config.frame_size = FRAMESIZE_CIF;  // 400x296 (even smaller)
-    config.jpeg_quality = 16;
+    config.frame_size = FRAMESIZE_QVGA;  // 320x240 (rất nhỏ)
+    config.jpeg_quality = 18;
     config.fb_count = 1;
   }
 
-  // Initialize camera
   esp_err_t err = esp_camera_init(&config);
   if (err != ESP_OK) {
     Serial.printf("❌ Camera init failed: 0x%x\n", err);
@@ -285,112 +267,350 @@ void setupCamera() {
   Serial.println("✅ Camera warmed up");
 }
 
-// ==================== ENHANCED UPLOAD FUNCTIONS ====================
-bool testServerConnection() {
-  Serial.println("🔍 Testing server connection...");
-  
+// ==================== UPLOAD FUNCTIONS ====================
+// Phương pháp 1: Raw Binary Upload với optimizations
+bool uploadRawBinary(uint8_t* buffer, size_t length) {
   HTTPClient http;
-  http.setTimeout(10000);
-  http.setReuse(false);
   
-  // Try to connect to server root first
-  String testUrl = String(serverUrl);
-  testUrl.replace("/upload", "");
+  // Set timeouts
+  http.setTimeout(60000);  // 60 seconds
+  http.setConnectTimeout(30000);  // 30 seconds
   
-  if (http.begin(wifiClient, testUrl)) {
-    int httpCode = http.GET();
-    Serial.printf("Server test: HTTP %d\n", httpCode);
-    http.end();
-    return (httpCode > 0);
+  // CRITICAL: Keep connection alive and reuse
+  http.setReuse(true);
+  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+  
+  Serial.printf("📤 Uploading RAW: %d bytes\n", length);
+  
+  if (!http.begin(wifiClient, serverUrl)) {
+    Serial.println("❌ HTTP begin failed");
+    return false;
   }
+  
+  // Minimal headers for ngrok compatibility
+  http.addHeader("Content-Type", "image/jpeg");
+  http.addHeader("Content-Length", String(length));
+  http.addHeader("User-Agent", "ESP32-CAM/1.0");
+  http.addHeader("Accept", "*/*");
+  
+  Serial.println("📡 Sending POST request...");
+  
+  // Send request
+  int httpCode = http.POST(buffer, length);
+  
+  Serial.printf("📬 HTTP Response Code: %d\n", httpCode);
+  
+  if (httpCode > 0) {
+    String response = http.getString();
+    Serial.printf("Response: %s\n", response.c_str());
+    
+    http.end();
+    return (httpCode == HTTP_CODE_OK || httpCode == 200);
+  } else {
+    Serial.printf("❌ HTTP Error: %d (%s)\n", httpCode, http.errorToString(httpCode).c_str());
+    
+    // Detailed error info
+    switch(httpCode) {
+      case HTTPC_ERROR_CONNECTION_REFUSED:
+        Serial.println("   → Connection refused by server");
+        break;
+      case HTTPC_ERROR_SEND_HEADER_FAILED:
+        Serial.println("   → Failed to send headers");
+        break;
+      case HTTPC_ERROR_SEND_PAYLOAD_FAILED:
+        Serial.println("   → Failed to send payload");
+        Serial.println("   → This often means: connection closed during upload");
+        break;
+      case HTTPC_ERROR_NOT_CONNECTED:
+        Serial.println("   → Not connected");
+        break;
+      case HTTPC_ERROR_CONNECTION_LOST:
+        Serial.println("   → Connection lost during transfer");
+        break;
+      case HTTPC_ERROR_READ_TIMEOUT:
+        Serial.println("   → Read timeout");
+        break;
+    }
+    
+    http.end();
+  }
+  
   return false;
 }
 
-bool uploadImageBuffer(uint8_t* buffer, size_t length) {
-  HTTPClient http;
+// Phương pháp 2: Chunked Upload (cho ảnh lớn)
+bool uploadChunked(uint8_t* buffer, size_t length) {
+  const size_t CHUNK_SIZE = 4096;  // 4KB chunks
   
-  // Configure timeouts
+  HTTPClient http;
   http.setTimeout(UPLOAD_TIMEOUT);
   http.setConnectTimeout(CONNECT_TIMEOUT);
   http.setReuse(false);
   
-  // Add chunked encoding for better reliability
   http.addHeader("Content-Type", "image/jpeg");
-  http.addHeader("Connection", "close");
-  http.addHeader("User-Agent", "ESP32-CAM");
+  http.addHeader("Transfer-Encoding", "chunked");
   
-  Serial.printf("📤 Uploading %d bytes...\n", length);
+  Serial.printf("📤 Uploading CHUNKED: %d bytes\n", length);
   
-  unsigned long uploadStart = millis();
-  
-  if (http.begin(wifiClient, serverUrl)) {
-    // Use chunked transfer encoding
-    int httpCode = http.POST(buffer, length);
-    unsigned long uploadTime = millis() - uploadStart;
-    
-    if (httpCode > 0) {
-      Serial.printf("📬 HTTP Response: %d (Time: %lums)\n", httpCode, uploadTime);
-      
-      if (httpCode == HTTP_CODE_OK) {
-        String response = http.getString();
-        Serial.printf("✅ Upload successful! Response: %s\n", response.c_str());
-        http.end();
-        return true;
-      } else {
-        Serial.printf("⚠️ Server returned: %d\n", httpCode);
-        String response = http.getString();
-        if (response.length() > 0) {
-          Serial.printf("Response: %s\n", response.c_str());
-        }
-      }
-    } else {
-      Serial.printf("❌ HTTP Error: %d (%s)\n", httpCode, http.errorToString(httpCode).c_str());
-      
-      // Enhanced error diagnostics
-      switch(httpCode) {
-        case -1: Serial.println("   → Connection timeout/refused"); break;
-        case -2: Serial.println("   → Invalid server response"); break;
-        case -3: 
-          Serial.println("   → Send payload failed - Network issue");
-          Serial.println("   → Check: WiFi signal, server reachability, payload size");
-          break;
-        case -4: Serial.println("   → Connection lost"); break;
-        case -11: Serial.println("   → Read timeout"); break;
-      }
-    }
-    
-    http.end();
-  } else {
-    Serial.println("❌ HTTP begin() failed");
+  if (!http.begin(wifiClient, serverUrl)) {
+    Serial.println("❌ HTTP begin failed");
+    return false;
   }
   
-  return false;
+  // Gửi từng chunk
+  WiFiClient* stream = http.getStreamPtr();
+  
+  if (!stream->connect(http.getStreamPtr()->remoteIP(), 80)) {
+    Serial.println("❌ Stream connection failed");
+    http.end();
+    return false;
+  }
+  
+  // Send HTTP headers manually
+  stream->println("POST /upload HTTP/1.1");
+  stream->printf("Host: %s\r\n", "having-medications-king-concerts.trycloudflare.com");
+  stream->println("Content-Type: image/jpeg");
+  stream->println("Connection: close");
+  stream->printf("Content-Length: %d\r\n", length);
+  stream->println();
+  
+  // Send body in chunks
+  size_t sent = 0;
+  Serial.print("Progress: ");
+  
+  while (sent < length) {
+    size_t toSend = min(CHUNK_SIZE, length - sent);
+    size_t written = stream->write(buffer + sent, toSend);
+    
+    if (written != toSend) {
+      Serial.println("\n❌ Write failed");
+      http.end();
+      return false;
+    }
+    
+    sent += written;
+    int progress = (sent * 100) / length;
+    Serial.printf("%d%% ", progress);
+    
+    delay(10);  // Small delay between chunks
+    
+    // Check connection
+    if (!stream->connected()) {
+      Serial.println("\n❌ Connection lost during upload");
+      http.end();
+      return false;
+    }
+  }
+  
+  Serial.println("100% ✓");
+  
+  // Wait for response
+  unsigned long timeout = millis();
+  while (stream->available() == 0) {
+    if (millis() - timeout > 10000) {
+      Serial.println("⏱️ Response timeout");
+      http.end();
+      return false;
+    }
+    delay(10);
+  }
+  
+  // Read response
+  String response = "";
+  while (stream->available()) {
+    char c = stream->read();
+    response += c;
+  }
+  
+  Serial.printf("📬 Response:\n%s\n", response.c_str());
+  
+  http.end();
+  
+  // Check if response contains success
+  return (response.indexOf("200 OK") > 0 || response.indexOf("success") > 0);
 }
 
-// ==================== IMPROVED CAPTURE & UPLOAD ====================
+// Phương pháp 3: TCP Direct Upload (bypass HTTPClient)
+bool uploadDirect(uint8_t* buffer, size_t length) {
+  WiFiClient client;
+  
+  // Parse hostname from URL
+  String hostname = "having-medications-king-concerts.trycloudflare.com";
+  int port = 80;
+  String path = "/upload";
+  
+  Serial.printf("📤 Connecting to %s:%d\n", hostname.c_str(), port);
+  
+  // Set timeouts BEFORE connecting
+  client.setTimeout(60000);  // 60 second timeout
+  
+  if (!client.connect(hostname.c_str(), port)) {
+    Serial.println("❌ Connection failed");
+    return false;
+  }
+  
+  Serial.println("✅ Connected, sending request...");
+  
+  // Build HTTP request manually
+  String headers = "";
+  headers += "POST " + String(path) + " HTTP/1.1\r\n";
+  headers += "Host: " + String(hostname) + "\r\n";
+  headers += "Content-Type: image/jpeg\r\n";
+  headers += "Content-Length: " + String(length) + "\r\n";
+  headers += "Connection: close\r\n";
+  headers += "\r\n";
+  
+  // Send headers first
+  Serial.println("📤 Sending headers...");
+  if (client.print(headers) == 0) {
+    Serial.println("❌ Failed to send headers");
+    client.stop();
+    return false;
+  }
+  
+  // Wait a bit for headers to be sent
+  delay(100);
+  
+  // Check if still connected
+  if (!client.connected()) {
+    Serial.println("❌ Connection lost after headers");
+    client.stop();
+    return false;
+  }
+  
+  // Send image data in VERY small chunks with delays
+  Serial.printf("📤 Sending %d bytes in chunks...\n", length);
+  
+  size_t sent = 0;
+  const size_t CHUNK_SIZE = 512;  // Smaller chunks (512 bytes)
+  unsigned long sendStart = millis();
+  
+  while (sent < length) {
+    // Check connection before each chunk
+    if (!client.connected()) {
+      Serial.printf("❌ Connection lost at %d bytes\n", sent);
+      client.stop();
+      return false;
+    }
+    
+    size_t toSend = min(CHUNK_SIZE, length - sent);
+    
+    // Send chunk
+    size_t written = client.write(buffer + sent, toSend);
+    
+    if (written == 0) {
+      Serial.printf("❌ Write failed at %d bytes\n", sent);
+      Serial.printf("   Connection status: %d\n", client.connected());
+      Serial.printf("   Available for write: %d\n", client.availableForWrite());
+      client.stop();
+      return false;
+    }
+    
+    sent += written;
+    
+    // Flush every chunk
+    client.flush();
+    
+    // Progress report every 5KB
+    if (sent % 5120 == 0 || sent == length) {
+      Serial.printf("  📊 Sent: %d/%d bytes (%d%%)\n", sent, length, (sent * 100) / length);
+    }
+    
+    // Important: longer delay between chunks for ngrok
+    delay(20);  // 20ms delay between chunks
+  }
+  
+  unsigned long sendTime = millis() - sendStart;
+  Serial.printf("✅ All data sent in %lu ms\n", sendTime);
+  
+  // Final flush
+  client.flush();
+  delay(100);
+  
+  // Wait for response
+  Serial.println("⏳ Waiting for server response...");
+  unsigned long timeout = millis();
+  while (!client.available() && millis() - timeout < 20000) {
+    if (!client.connected()) {
+      Serial.println("❌ Connection closed by server (no response)");
+      client.stop();
+      return false;
+    }
+    delay(50);
+  }
+  
+  if (!client.available()) {
+    Serial.println("⏱️ Response timeout");
+    client.stop();
+    return false;
+  }
+  
+  // Read response
+  Serial.println("📬 Server response:");
+  String response = "";
+  
+  // Read status line
+  if (client.available()) {
+    String statusLine = client.readStringUntil('\n');
+    Serial.println(statusLine);
+    response += statusLine;
+  }
+  
+  // Read headers
+  while (client.available()) {
+    String line = client.readStringUntil('\n');
+    Serial.println(line);
+    response += line + "\n";
+    
+    if (line.length() <= 1) break;  // Empty line = end of headers
+  }
+  
+  // Read body
+  delay(50);  // Wait for body
+  if (client.available()) {
+    String body = client.readString();
+    Serial.printf("Body: %s\n", body.c_str());
+    response += body;
+  }
+  
+  client.stop();
+  
+  // Check success
+  bool success = (response.indexOf("200 OK") >= 0 || 
+                  response.indexOf("\"success\":true") >= 0 ||
+                  response.indexOf("successfully") >= 0);
+  
+  if (success) {
+    Serial.println("✅ Upload confirmed successful!");
+  } else {
+    Serial.println("⚠️ Upload may have failed - check response above");
+  }
+  
+  return success;
+}
+
+// ==================== CAPTURE & UPLOAD ====================
 void captureAndUploadPhoto() {
-  unsigned long t_start, t_capture;
-  // Turn on flash and give it a moment to stabilize
+  // Turn on flash
   digitalWrite(FLASH_GPIO_NUM, HIGH);
   delay(120);
   
-  // Clear any previous frame
+  // Clear previous frame
   camera_fb_t * fb_temp = esp_camera_fb_get();
   if (fb_temp) {
     esp_camera_fb_return(fb_temp);
-    delay(200); // Longer delay for camera stabilization
+    delay(200);
   }
   
   // Capture photo
-  t_start = millis();
   Serial.println("📷 Capturing image...");
+  unsigned long t_start = millis();
   
   camera_fb_t * fb = esp_camera_fb_get();
-  t_capture = millis();
+  unsigned long t_capture = millis();
   
   if (!fb) {
     Serial.println("❌ Camera capture failed!");
-    // Turn off flash before exiting
     digitalWrite(FLASH_GPIO_NUM, LOW);
     return;
   }
@@ -399,58 +619,34 @@ void captureAndUploadPhoto() {
   Serial.printf("📊 Free heap: %d bytes\n", ESP.getFreeHeap());
   Serial.printf("📶 WiFi RSSI: %d dBm\n", WiFi.RSSI());
 
-  // Enhanced WiFi verification
   if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("❌ WiFi not connected, aborting upload");
+    Serial.println("❌ WiFi not connected");
     esp_camera_fb_return(fb);
     digitalWrite(FLASH_GPIO_NUM, LOW);
     return;
   }
 
-  // Test server connection first
-  if (!testServerConnection()) {
-    Serial.println("❌ Server connection test failed!");
-    esp_camera_fb_return(fb);
-    digitalWrite(FLASH_GPIO_NUM, LOW);
-    return;
-  }
-
-  // Upload with enhanced retry mechanism
+  // Try upload methods in order
   bool uploadSuccess = false;
   
   for (int attempt = 1; attempt <= MAX_UPLOAD_RETRIES && !uploadSuccess; attempt++) {
     Serial.printf("\n🔄 Upload attempt %d/%d\n", attempt, MAX_UPLOAD_RETRIES);
-    Serial.printf("🌐 Target: %s\n", serverUrl);
     
-    // Enhanced DNS check
-    Serial.print("🔍 DNS resolution... ");
-    IPAddress serverIP;
-    String hostname = String(serverUrl);
-    hostname.replace("http://", "");
-    hostname.replace("https://", "");
-    int slashIndex = hostname.indexOf('/');
-    if (slashIndex > 0) {
-      hostname = hostname.substring(0, slashIndex);
+    // Try Method 1 first (HTTPClient - simplest)
+    Serial.println("Method: HTTPClient POST");
+    uploadSuccess = uploadRawBinary(fb->buf, fb->len);
+    
+    // If failed, try Direct TCP as backup
+    if (!uploadSuccess) {
+      Serial.println("\nTrying backup method: Direct TCP");
+      uploadSuccess = uploadDirect(fb->buf, fb->len);
     }
     
-    if (WiFi.hostByName(hostname.c_str(), serverIP)) {
-      Serial.printf("✅ %s -> %s\n", hostname.c_str(), serverIP.toString().c_str());
-    } else {
-      Serial.println("❌ DNS resolution failed!");
-      delay(2000);
-      continue;
-    }
-    
-    // Attempt upload
-    uploadSuccess = uploadImageBuffer(fb->buf, fb->len);
-    
-    // Wait before retry with increasing delay
     if (!uploadSuccess && attempt < MAX_UPLOAD_RETRIES) {
-      int retryDelay = 2000 * attempt; // 2s, 4s, etc.
+      int retryDelay = 2000 * attempt;
       Serial.printf("⏳ Retry in %ds...\n", retryDelay/1000);
       delay(retryDelay);
       
-      // Re-check WiFi before retry
       if (WiFi.status() != WL_CONNECTED) {
         Serial.println("🔄 WiFi lost, reconnecting...");
         WiFi.reconnect();
@@ -459,7 +655,7 @@ void captureAndUploadPhoto() {
     }
   }
   
-  // Final status report
+  // Final status
   if (uploadSuccess) {
     Serial.println("\n🎉 UPLOAD SUCCESSFUL!");
     if (mqttClient.connected()) {
@@ -470,32 +666,9 @@ void captureAndUploadPhoto() {
     if (mqttClient.connected()) {
       mqttClient.publish(mqtt_status_topic, "upload_failed");
     }
-    Serial.println("🔧 System Status:");
-    Serial.printf("  • WiFi: %d (%s)\n", WiFi.status(), WiFi.status() == WL_CONNECTED ? "CONNECTED" : "DISCONNECTED");
-    Serial.printf("  • Signal: %d dBm\n", WiFi.RSSI());
-    Serial.printf("  • Free Heap: %d bytes\n", ESP.getFreeHeap());
-    Serial.printf("  • Image Size: %d bytes\n", fb->len);
-    Serial.printf("  • PSRAM: %s\n", psramFound() ? "Yes" : "No");
-    
-    // Suggest solutions based on error pattern
-    Serial.println("\n💡 Suggested fixes:");
-    Serial.println("  1. Check server URL and endpoint");
-    Serial.println("  2. Improve WiFi signal strength");
-    Serial.println("  3. Reduce image quality/size");
-    Serial.println("  4. Check server logs for errors");
-    Serial.println("  5. Verify server accepts POST requests");
   }
   
-  // Always release buffer
   esp_camera_fb_return(fb);
-  // Turn off flash after done
   digitalWrite(FLASH_GPIO_NUM, LOW);
-  Serial.println("✅ Camera buffer released");
-  
-  // Force garbage collection
-  if (ESP.getFreeHeap() < 100000) {
-    Serial.println("🧹 Low memory, cleaning up...");
-    delay(100);
-  }
-
+  Serial.println("✅ Camera buffer released\n");
 }
